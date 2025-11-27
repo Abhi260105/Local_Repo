@@ -124,12 +124,22 @@
     <div class="header">
       <h1>📅 Daily Task Tracker</h1>
       <div id="currentDate" class="current-date"></div>
-      <p>Track daily tasks, set reminders & view complete history</p>
+      <div class="stats-summary">
+        <span>📊 3/5 Done</span>
+        <span>🔥 7 Day Streak</span>
+      </div>
     </div>
 
     <div id="tasksView">
       <div class="card add-task">
-        <input id="taskInput" class="task-input" placeholder="Add a task and press Enter or Add" />
+        <input id="taskInput" class="task-input" placeholder="Add a task..." />
+        <select id="categorySelect" class="category-select">
+          <option value="">No Category</option>
+          <option value="work">💼 Work</option>
+          <option value="personal">🏠 Personal</option>
+          <option value="health">💪 Health</option>
+          <option value="learning">📚 Learning</option>
+        </select>
         <button id="addBtn" class="add-btn">Add</button>
       </div>
 
@@ -275,17 +285,22 @@ function checkDailyReset(){
 
 function addTaskFromInput(){
   const input = qs('taskInput');
+  const categorySelect = qs('categorySelect');
   const title = input.value.trim();
   if(!title) return;
+  
   const newTask = { 
     id: Date.now(), 
-    title, 
+    title,
+    category: categorySelect.value || 'none', // ADD THIS LINE
     status:{ sunday:null,monday:null,tuesday:null,wednesday:null,thursday:null,friday:null,saturday:null }, 
     reminder:null, 
     reminderShown:false 
   };
+  
   tasks.push(newTask);
   input.value = '';
+  categorySelect.value = ''; // ADD THIS LINE
   saveAll();
   renderTasks();
   renderHistoryView();
