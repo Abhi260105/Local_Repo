@@ -420,11 +420,13 @@ function renderTasks(){
     qs('emptyState').style.display='none';
   }
   
-  const sorted = [...tasks].sort((a,b)=>{
-    const aDone = a.status && a.status[todayKey] === true;
-    const bDone = b.status && b.status[todayKey] === true;
-    if(aDone === bDone) return a.title.localeCompare(b.title);
-    return aDone ? 1 : -1;
+  let filtered = tasks;
+  if(currentFilter !== 'all'){
+    filtered = tasks.filter(t => t.category === currentFilter);
+  }
+
+  const sorted = [...filtered].sort((a,b)=>{
+    // ... rest of sorting logic stays the same
   });
   
   sorted.forEach(task=>{
@@ -882,7 +884,11 @@ function attachUI(){
     if(e.target === qs('taskHistoryModal')) hideModal('taskHistoryModal');
   });
 }
-
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    filterTasks(btn.dataset.filter);
+  });
+});
 function startTickers(){
   setInterval(() => {
     updateCurrentDate();
