@@ -239,6 +239,7 @@ const TASKS_KEY = 'daily_tasks_v6';
 const TASK_HISTORY_KEY = 'daily_task_history_v6';
 const LAST_RESET_KEY = 'last_reset_date_v6';
 
+let currentFilter = 'all';
 let tasks = [], taskHistory = [], lastResetDate = null, currentReminderTaskId = null;
 const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -295,6 +296,18 @@ function checkDailyReset(){
     renderTasks();
     updateStats();
   }
+}
+
+function filterTasks(category){
+  currentFilter = category;
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    if(btn.dataset.filter === category){
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+  renderTasks();
 }
 
 function addTaskFromInput(){
