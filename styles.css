@@ -668,3 +668,24 @@ body {
     font-size: 0.7rem;
   }
 }
+.progress-ring-wrapper{
+  position:relative;
+  display:inline-block;
+  margin:8px auto;
+}
+.progress-ring{
+  transform:rotate(-90deg);
+}
+.progress-ring-circle{
+  transition:stroke-dashoffset 0.35s;
+  transform-origin:50% 50%;
+}
+.progress-text{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  font-size:1.2rem;
+  font-weight:800;
+  color:var(--accent);
+}
