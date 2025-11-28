@@ -60,6 +60,7 @@ function init() {
   updateHeaderStats();
   startTickers();
   attachUI();
+  updateHeaderStats();
 }
 
 function updateCurrentDate() {
@@ -676,54 +677,55 @@ function updateStats() {
 function updateHeaderStats() {
   const todayKey = DAYS[new Date().getDay()];
   let todayCompleted = 0;
-  let totalTasks = tasks.length;
+
+  const totalTasks = tasks.length;
 
   tasks.forEach(task => {
-    const currentStatus = (task.status && typeof task.status === 'object') ? task.status[todayKey] : null;
-    if (currentStatus === true) {
-      todayCompleted++;
-    }
+    const currentStatus = (task.status && typeof task.status === 'object')
+      ? task.status[todayKey]
+      : null;
+    if (currentStatus === true) todayCompleted++;
   });
 
-  // Calculate streak
   const streak = calculateStreak();
+  const stats = qs('statsSummary');
 
-  const statsSummary = qs('statsSummary');
-  statsSummary.innerHTML = `
-    <span>📊 ${todayCompleted}/${totalTasks} Done</span>
+  if (totalTasks === 0) {
+    stats.innerHTML = `
+      <span style="color:var(--muted)">No tasks yet</span>
+      <span>🔥 ${streak} Day Streak</span>
+    `;
+    return;
+  }
+
+  const percentage = Math.round((todayCompleted / totalTasks) * 100);
+
+  stats.innerHTML = `
+    <span>📊 ${todayCompleted}/${totalTasks} Done (${percentage}%)</span>
     <span>🔥 ${streak} Day Streak</span>
   `;
 }
 
+
 function calculateStreak() {
-  if (taskHistory.length === 0) return 0;
+  const completed = new Set();
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  // Collect all dates where at least one task was completed
-  const completedDates = new Set();
-  taskHistory.forEach(histTask => {
-    histTask.history.forEach(h => {
-      if (h.status) {
-        completedDates.add(h.date);
-      }
+  taskHistory.forEach(task => {
+    task.history.forEach(h => {
+      if (h.status) completed.add(h.date);
     });
   });
 
-  // Convert to array and sort
-  const sortedDates = Array.from(completedDates).sort().reverse();
-
-  if (sortedDates.length === 0) return 0;
+  if (completed.size === 0) return 0;
 
   let streak = 0;
-  let currentDate = new Date(today);
-
-  for (let i = 0; i < sortedDates.length; i++) {
-    const dateStr = nowDateStr(currentDate);
-    if (sortedDates.includes(dateStr)) {
+  let d = new Date();
+  
+  while (true) {
+    const ds = nowDateStr(d);
+    if (completed.has(ds)) {
       streak++;
-      currentDate.setDate(currentDate.getDate() - 1);
+      d.setDate(d.getDate() - 1);
     } else {
       break;
     }
