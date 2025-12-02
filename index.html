@@ -3,37 +3,37 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Daily Task Tracker — Enhanced</title>
+<title>Daily Task Tracker</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>📅 Daily Task Tracker</h1>
+      <h1>Daily Task Tracker</h1>
       <div id="currentDate" class="current-date"></div>
       <div class="stats-summary" id="statsSummary">
-        <span>📊 0/0 Done</span>
-        <span>🔥 0 Day Streak</span>
+        <span>0/0 Done</span>
+        <span>0 Day Streak</span>
       </div>
     </div>
 
     <div id="tasksView">
-      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;justify-content:center">
+      <div class="filter-group">
         <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="work">💼 Work</button>
-        <button class="filter-btn" data-filter="personal">🏠 Personal</button>
-        <button class="filter-btn" data-filter="health">💪 Health</button>
-        <button class="filter-btn" data-filter="learning">📚 Learning</button>
+        <button class="filter-btn" data-filter="work">Work</button>
+        <button class="filter-btn" data-filter="personal">Personal</button>
+        <button class="filter-btn" data-filter="health">Health</button>
+        <button class="filter-btn" data-filter="learning">Learning</button>
       </div>
 
       <div class="add-task">
         <input id="taskInput" class="task-input" type="text" placeholder="Add a new task..." />
-        <select id="categorySelect" class="task-input" style="flex:0.3;cursor:pointer">
+        <select id="categorySelect" class="task-input category-select">
           <option value="">Category</option>
-          <option value="work">💼 Work</option>
-          <option value="personal">🏠 Personal</option>
-          <option value="health">💪 Health</option>
-          <option value="learning">📚 Learning</option>
+          <option value="work">Work</option>
+          <option value="personal">Personal</option>
+          <option value="health">Health</option>
+          <option value="learning">Learning</option>
         </select>
         <button id="addBtn" class="add-btn">Add</button>
       </div>
@@ -45,14 +45,14 @@
         </div>
 
         <div id="tasksList" class="tasks-list"></div>
-        <div id="emptyState" style="display:none;padding:12px;text-align:center;color:var(--muted)">No tasks yet — add your first task.</div>
+        <div id="emptyState" class="empty-state">No tasks yet — add your first task.</div>
       </div>
     </div>
 
     <div id="historySection" class="history-section">
-      <div style="font-weight:800;color:var(--accent);margin-bottom:12px;font-size:1.1rem">📊 Task History & Statistics</div>
+      <div class="section-title">Task History & Statistics</div>
       
-      <div class="card" id="statsCard" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+      <div class="card stats-grid">
         <div class="stat-box">
           <div class="stat-value" id="statTotalTasks">0</div>
           <div class="stat-label">Total Tasks</div>
@@ -69,21 +69,21 @@
 
       <div class="card">
         <div id="taskHistoryList"></div>
-        <div id="noHistory" style="display:none;padding:12px;text-align:center;color:var(--muted)">No task history yet. Complete tasks to populate history.</div>
+        <div id="noHistory" class="empty-state">No task history yet. Complete tasks to populate history.</div>
       </div>
     </div>
   </div>
 
   <div id="reminderModal" class="modal">
     <div class="modal-card">
-      <div class="modal-title">⏰ Set Reminder</div>
-      <div id="reminderFor" style="color:var(--muted);margin-bottom:8px"></div>
+      <div class="modal-title">Set Reminder</div>
+      <div id="reminderFor" class="reminder-for"></div>
 
-      <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="modal-content">
         <div class="reminder-row">
           <div class="time-pill">
             <input id="remHour" type="number" min="1" max="12" value="12" />
-            <span style="font-weight:800">:</span>
+            <span class="time-separator">:</span>
             <input id="remMin" type="number" min="0" max="59" value="00" />
           </div>
           <div class="ampm-toggle">
@@ -91,17 +91,17 @@
             <button id="ampmPM" class="ampm-btn">PM</button>
           </div>
         </div>
-        <textarea id="remNote" placeholder="Optional note" style="min-height:80px;background:transparent;border:1px solid rgba(255,255,255,0.03);padding:8px;border-radius:8px;color:#fff;resize:vertical"></textarea>
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button id="remCancel" style="padding:8px 12px;border-radius:10px;border:none;background:linear-gradient(90deg,#9c27b0,#7b1fa2);cursor:pointer;color:#fff;font-weight:700">Cancel</button>
-          <button id="remSave" style="padding:8px 12px;border-radius:10px;border:none;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#000;cursor:pointer;font-weight:700">Save</button>
+        <textarea id="remNote" class="reminder-note" placeholder="Optional note"></textarea>
+        <div class="modal-actions">
+          <button id="remCancel" class="btn-secondary">Cancel</button>
+          <button id="remSave" class="btn-primary">Save</button>
         </div>
       </div>
     </div>
   </div>
 
   <div id="taskHistoryModal" class="modal">
-    <div class="modal-card">
+    <div class="modal-card large">
       <div id="taskHistoryTitle" class="modal-title">Task History</div>
       <div id="taskHistoryContent"></div>
       <button id="closeTaskHistory" class="modal-close">Close</button>
@@ -110,8 +110,8 @@
 
   <div class="bottom-nav">
     <div class="nav-inner">
-      <button id="navTasks" class="nav-btn active">📋 Tasks</button>
-      <button id="navHistory" class="nav-btn">📊 History</button>
+      <button id="navTasks" class="nav-btn active">Tasks</button>
+      <button id="navHistory" class="nav-btn">History</button>
     </div>
   </div>
 
