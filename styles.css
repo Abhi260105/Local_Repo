@@ -902,4 +902,7 @@ body {
     padding: 24px 20px;
   }
 
-  
+  .filter-group {
+    justify-content: flex-start;
+  }
+}
