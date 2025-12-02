@@ -1,858 +1,687 @@
-// Storage keys
-const TASKS_KEY = 'daily_tasks_v6';
-const TASK_HISTORY_KEY = 'daily_task_history_v6';
-const LAST_RESET_KEY = 'last_reset_date_v6';
 
-// State variables
-let currentFilter = 'all';
+
+// ============================================
+// DAILY TASK TRACKER - Complete JavaScript
+// ============================================
+
+// State Management
 let tasks = [];
-let taskHistory = [];
-let lastResetDate = null;
+let currentFilter = 'all';
 let currentReminderTaskId = null;
+let touchStartX = 0;
+let touchCurrentX = 0;
+let isSwiping = false;
+let currentSwipeElement = null;
 
-// Constants
-const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// ============================================
+// INITIALIZATION
+// ============================================
 
-// Utility functions
-function qs(id) {
-  return document.getElementById(id);
-}
-
-function nowDateStr(d = new Date()) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-// Storage functions
-function loadAll() {
-  try {
-    tasks = JSON.parse(localStorage.getItem(TASKS_KEY) || '[]');
-    taskHistory = JSON.parse(localStorage.getItem(TASK_HISTORY_KEY) || '[]');
-    lastResetDate = localStorage.getItem(LAST_RESET_KEY) || null;
-  } catch (e) {
-    console.error('load error', e);
-    tasks = [];
-    taskHistory = [];
-    lastResetDate = null;
-  }
-}
-
-function saveAll() {
-  localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
-  localStorage.setItem(TASK_HISTORY_KEY, JSON.stringify(taskHistory));
-  localStorage.setItem(LAST_RESET_KEY, lastResetDate || '');
-}
-
-// Initialization
-function init() {
-  loadAll();
+document.addEventListener('DOMContentLoaded', () => {
+  loadFromStorage();
+  initEventListeners();
   updateCurrentDate();
-  checkDailyReset();
   renderTasks();
-  renderHistoryView();
   updateStats();
-  updateHeaderStats();
-  startTickers();
-  attachUI();
-}
-
-function updateCurrentDate() {
-  const now = new Date();
-  qs('currentDate').textContent = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-  qs('todayHeader').textContent = DAY_NAMES[now.getDay()];
-}
-
-function checkDailyReset() {
-  const todayStr = nowDateStr();
-  if (lastResetDate !== todayStr) {
-    tasks.forEach(t => {
-      t.status = {
-        sunday: null,
-        monday: null,
-        tuesday: null,
-        wednesday: null,
-        thursday: null,
-        friday: null,
-        saturday: null
-      };
-      t.reminderShown = false;
-    });
-    lastResetDate = todayStr;
-    saveAll();
-    renderTasks();
-    updateStats();
-    updateHeaderStats();
+  checkReminders();
+  
+  // Check reminders every minute
+  setInterval(checkReminders, 60000);
+  
+  // Request notification permission if available
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
   }
-}
+});
 
-// Filter functions
-function filterTasks(category) {
-  currentFilter = category;
+// ============================================
+// EVENT LISTENERS
+// ============================================
+
+function initEventListeners() {
+  // Add task
+  document.getElementById('addBtn').addEventListener('click', addTask);
+  document.getElementById('taskInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') addTask();
+  });
+
+  // Filter buttons
   document.querySelectorAll('.filter-btn').forEach(btn => {
-    if (btn.dataset.filter === category) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
+    btn.addEventListener('click', (e) => {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      currentFilter = e.target.dataset.filter;
+      renderTasks();
+    });
+  });
+
+  // Navigation
+  document.getElementById('navTasks').addEventListener('click', () => switchView('tasks'));
+  document.getElementById('navHistory').addEventListener('click', () => switchView('history'));
+
+  // Reminder modal controls
+  document.getElementById('remCancel').addEventListener('click', closeReminderModal);
+  document.getElementById('remSave').addEventListener('click', saveReminder);
+  document.getElementById('reminderModal').addEventListener('click', (e) => {
+    if (e.target.id === 'reminderModal') closeReminderModal();
+  });
+
+  // AM/PM toggle buttons
+  document.getElementById('ampmAM').addEventListener('click', () => toggleAMPM('AM'));
+  document.getElementById('ampmPM').addEventListener('click', () => toggleAMPM('PM'));
+
+  // Task history modal
+  document.getElementById('closeTaskHistory').addEventListener('click', closeTaskHistoryModal);
+  document.getElementById('taskHistoryModal').addEventListener('click', (e) => {
+    if (e.target.id === 'taskHistoryModal') closeTaskHistoryModal();
+  });
+
+  // Time input validation
+  document.getElementById('remHour').addEventListener('input', (e) => {
+    let val = parseInt(e.target.value);
+    if (isNaN(val)) {
+      e.target.value = '';
+      return;
+    }
+    if (val > 12) e.target.value = 12;
+    if (val < 1) e.target.value = 1;
+  });
+
+  document.getElementById('remMin').addEventListener('input', (e) => {
+    let val = e.target.value;
+    if (val === '') return;
+    
+    let numVal = parseInt(val);
+    if (isNaN(numVal)) {
+      e.target.value = '00';
+      return;
+    }
+    
+    if (numVal > 59) e.target.value = '59';
+    if (numVal < 0) e.target.value = '00';
+    
+    // Pad with zero if single digit
+    if (e.target.value.length === 1 && numVal >= 0 && numVal <= 9) {
+      e.target.value = '0' + e.target.value;
     }
   });
-  renderTasks();
 }
 
-// Task management functions
-function addTaskFromInput() {
-  const input = qs('taskInput');
-  const categorySelect = qs('categorySelect');
-  const title = input.value.trim();
-  if (!title) return;
+// ============================================
+// TASK MANAGEMENT
+// ============================================
 
-  const newTask = {
+function addTask() {
+  const input = document.getElementById('taskInput');
+  const categorySelect = document.getElementById('categorySelect');
+  const text = input.value.trim();
+  const category = categorySelect.value;
+
+  if (!text) {
+    alert('Please enter a task name');
+    return;
+  }
+
+  const task = {
     id: Date.now(),
-    title,
-    category: categorySelect.value || 'none',
-    status: {
-      sunday: null,
-      monday: null,
-      tuesday: null,
-      wednesday: null,
-      thursday: null,
-      friday: null,
-      saturday: null
-    },
+    text,
+    category: category || 'personal',
+    status: 'pending',
+    createdAt: new Date().toISOString(),
     reminder: null,
-    reminderShown: false
+    history: []
   };
 
-  tasks.push(newTask);
+  tasks.push(task);
   input.value = '';
   categorySelect.value = '';
-  saveAll();
+  
+  saveToStorage();
   renderTasks();
-  renderHistoryView();
-  updateStats();
-  updateHeaderStats();
-}
-
-function deleteTask(id) {
-  tasks = tasks.filter(t => t.id !== id);
-  taskHistory = taskHistory.filter(h => h.taskId !== id);
-  saveAll();
-  renderTasks();
-  renderHistoryView();
-  updateStats();
-  updateHeaderStats();
-}
-
-function setTaskStatus(id, val) {
-  const todayKey = DAYS[new Date().getDay()];
-  const t = tasks.find(x => x.id === id);
-  if (!t) return;
-
-  t.status[todayKey] = !!val;
-
-  const todayStr = nowDateStr();
-  let histTask = taskHistory.find(h => h.taskId === id);
-  if (!histTask) {
-    histTask = {
-      taskId: id,
-      title: t.title,
-      history: []
-    };
-    taskHistory.push(histTask);
-  }
-
-  const existingIdx = histTask.history.findIndex(h => h.date === todayStr);
-  if (existingIdx >= 0) {
-    histTask.history[existingIdx].status = !!val;
-  } else {
-    histTask.history.push({
-      date: todayStr,
-      status: !!val
-    });
-  }
-
-  saveAll();
-  renderTasks();
-  renderHistoryView();
-  updateStats();
-  updateHeaderStats();
-}
-
-// Reminder functions
-function openReminderModalFor(id) {
-  const task = tasks.find(t => t.id === id);
-  if (!task) return;
-  currentReminderTaskId = id;
-  qs('reminderFor').textContent = task.title;
-  qs('remHour').value = task.reminder ? task.reminder.hour : 12;
-  qs('remMin').value = task.reminder ? String(task.reminder.minute).padStart(2, '0') : '00';
-  if (task.reminder && task.reminder.ampm === 'PM') {
-    qs('ampmPM').classList.add('active');
-    qs('ampmAM').classList.remove('active');
-  } else {
-    qs('ampmAM').classList.add('active');
-    qs('ampmPM').classList.remove('active');
-  }
-  qs('remNote').value = task.reminder ? (task.reminder.note || '') : '';
-  showModal('reminderModal');
-}
-
-function saveReminderForCurrent() {
-  if (!currentReminderTaskId) return;
-  const task = tasks.find(t => t.id === currentReminderTaskId);
-  if (!task) return;
-  let hour = parseInt(qs('remHour').value, 10);
-  if (isNaN(hour) || hour < 1) hour = 12;
-  if (hour > 12) hour = 12;
-  let minute = parseInt(qs('remMin').value, 10);
-  if (isNaN(minute) || minute < 0) minute = 0;
-  if (minute > 59) minute = 59;
-  const ampm = qs('ampmPM').classList.contains('active') ? 'PM' : 'AM';
-  const note = qs('remNote').value.trim();
-  task.reminder = {
-    hour,
-    minute,
-    ampm,
-    note
-  };
-  task.reminderShown = false;
-  saveAll();
-  hideModal('reminderModal');
-  renderTasks();
-  alert('Reminder saved: ' + `${hour}:${String(minute).padStart(2, '0')} ${ampm}`);
-}
-
-// Render functions
-function renderTasks() {
-  const list = qs('tasksList');
-  list.innerHTML = '';
-  const todayKey = DAYS[new Date().getDay()];
-
-  if (!tasks || tasks.length === 0) {
-    qs('emptyState').style.display = 'block';
-    return;
-  } else {
-    qs('emptyState').style.display = 'none';
-  }
-
-  let filtered = tasks;
-  if (currentFilter !== 'all') {
-    filtered = tasks.filter(t => t.category === currentFilter);
-  }
-
-  const sorted = [...filtered].sort((a, b) => {
-    const aStatus = (a.status && typeof a.status === 'object') ? a.status[todayKey] : null;
-    const bStatus = (b.status && typeof b.status === 'object') ? b.status[todayKey] : null;
-    if (aStatus === null && bStatus !== null) return -1;
-    if (aStatus !== null && bStatus === null) return 1;
-    return 0;
-  });
-
-  sorted.forEach(task => {
-    const row = document.createElement('div');
-    row.className = 'task-row';
-
-    const deleteArea = document.createElement('div');
-    deleteArea.className = 'swipe-delete';
-    deleteArea.innerHTML = '🗑️';
-    deleteArea.addEventListener('click', () => {
-      if (confirm(`Delete "${task.title}"?`)) {
-        deleteTask(task.id);
-      }
-    });
-
-    const content = document.createElement('div');
-    content.className = 'task-content';
-
-    const title = document.createElement('div');
-    title.className = 'task-title';
-    const categoryIcons = {
-      'work': '💼',
-      'personal': '🏠',
-      'health': '💪',
-      'learning': '📚',
-      'none': ''
-    };
-
-    const categoryBadge = task.category && task.category !== 'none' ?
-      `<span style="background:rgba(100,255,218,0.1);padding:2px 8px;border-radius:6px;font-size:0.8rem;margin-right:8px">${categoryIcons[task.category] || ''}</span>` :
-      '';
-
-    title.innerHTML = categoryBadge + escapeHtml(task.title);
-
-    const meta = document.createElement('div');
-    meta.className = 'task-meta';
-
-    const bell = document.createElement('div');
-    bell.className = 'icon-bell';
-    bell.innerHTML = '🔔';
-    if (task.reminder) {
-      const b = document.createElement('span');
-      b.className = 'badge';
-      bell.appendChild(b);
-    }
-    bell.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openReminderModalFor(task.id);
-    });
-
-    const statusBox = document.createElement('div');
-    statusBox.className = 'status-actions';
-    const currentStatus = (task.status && typeof task.status === 'object') ? task.status[todayKey] : null;
-
-    if (currentStatus === null) {
-      const yes = document.createElement('button');
-      yes.className = 'btn-status btn-yes';
-      yes.textContent = 'Yes';
-      const no = document.createElement('button');
-      no.className = 'btn-status btn-no';
-      no.textContent = 'No';
-      yes.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        setTaskStatus(task.id, true);
-      });
-      no.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        setTaskStatus(task.id, false);
-      });
-      statusBox.appendChild(yes);
-      statusBox.appendChild(no);
-    } else {
-      const b = document.createElement('div');
-      b.className = 'status-badge ' + (currentStatus ? 'done' : 'failed');
-      b.textContent = currentStatus ? '✓' : '✗';
-      statusBox.appendChild(b);
-    }
-
-    meta.appendChild(bell);
-    meta.appendChild(statusBox);
-    content.appendChild(title);
-    content.appendChild(meta);
-    row.appendChild(deleteArea);
-    row.appendChild(content);
-    bindSwipeToDelete(content, row, task.id);
-    list.appendChild(row);
-  });
-}
-
-function bindSwipeToDelete(contentEl, containerRow, taskId) {
-  let startX = 0,
-    currentX = 0,
-    dragging = false;
-  const threshold = 90,
-    maxSlide = 110;
-
-  function pointerStart(x) {
-    startX = x;
-    currentX = x;
-    dragging = true;
-    contentEl.style.transition = 'none';
-  }
-
-  function pointerMove(x) {
-    if (!dragging) return;
-    currentX = x;
-    const diff = startX - currentX;
-    if (diff > 0) {
-      const px = Math.min(diff, maxSlide);
-      contentEl.style.transform = `translateX(-${px}px)`;
-      if (px > 20) containerRow.classList.add('show-delete');
-      else containerRow.classList.remove('show-delete');
-    }
-  }
-
-  function pointerEnd() {
-    if (!dragging) return;
-    dragging = false;
-    contentEl.style.transition = 'transform .2s ease';
-    const diff = startX - currentX;
-    if (diff > threshold) {
-      contentEl.style.transform = `translateX(-${maxSlide}px)`;
-      setTimeout(() => {
-        if (confirm(`Delete this task?`)) {
-          deleteTask(taskId);
-        } else {
-          containerRow.classList.remove('show-delete');
-          contentEl.style.transform = 'translateX(0)';
-        }
-      }, 220);
-    } else {
-      containerRow.classList.remove('show-delete');
-      contentEl.style.transform = 'translateX(0)';
-    }
-  }
-
-  contentEl.addEventListener('touchstart', (e) => pointerStart(e.touches[0].clientX), {
-    passive: true
-  });
-  contentEl.addEventListener('touchmove', (e) => pointerMove(e.touches[0].clientX), {
-    passive: true
-  });
-  contentEl.addEventListener('touchend', () => pointerEnd());
-  contentEl.addEventListener('mousedown', (e) => pointerStart(e.clientX));
-  window.addEventListener('mousemove', (e) => pointerMove(e.clientX));
-  window.addEventListener('mouseup', () => pointerEnd());
-}
-
-function deleteTaskHistory(taskId) {
-  taskHistory = taskHistory.filter(h => h.taskId !== taskId);
-  saveAll();
-  renderHistoryView();
   updateStats();
 }
 
-function renderHistoryView() {
-  const list = qs('taskHistoryList');
-  list.innerHTML = '';
-
-  if (!taskHistory || taskHistory.length === 0) {
-    qs('noHistory').style.display = 'block';
-    return;
-  }
-
-  qs('noHistory').style.display = 'none';
-
-  taskHistory.forEach(histTask => {
-    const task = tasks.find(t => t.id === histTask.taskId);
-    if (!task) return;
-
-    const row = document.createElement('div');
-    row.className = 'history-item-row';
-
-    const deleteArea = document.createElement('div');
-    deleteArea.className = 'history-delete';
-    deleteArea.innerHTML = '🗑️';
-    deleteArea.addEventListener('click', () => {
-      if (confirm(`Delete history for "${histTask.title}"?`)) {
-        deleteTaskHistory(histTask.taskId);
-      }
-    });
-
-    const item = document.createElement('div');
-    item.className = 'task-history-item';
-
-    const title = document.createElement('div');
-    title.className = 'task-history-title';
-    title.textContent = histTask.title;
-
-    const stats = document.createElement('div');
-    stats.className = 'task-history-stats';
-
-    const totalDays = histTask.history.length;
-    const completedDays = histTask.history.filter(h => h.status).length;
-    const failedDays = histTask.history.filter(h => !h.status).length;
-
-    stats.innerHTML = `
-      <div class="task-history-stat"><span style="color:var(--success)">✓</span> ${completedDays}</div>
-      <div class="task-history-stat"><span style="color:var(--danger)">✗</span> ${failedDays}</div>
-      <div class="task-history-stat"><span style="color:var(--muted)">📅</span> ${totalDays} days</div>
-    `;
-
-    item.appendChild(title);
-    item.appendChild(stats);
-
-    item.addEventListener('click', () => openTaskHistoryModal(histTask.taskId));
-
-    row.appendChild(deleteArea);
-    row.appendChild(item);
-    bindSwipeToDeleteHistory(item, row, histTask.taskId);
-    list.appendChild(row);
-  });
-}
-
-function bindSwipeToDeleteHistory(contentEl, containerRow, taskId) {
-  let startX = 0,
-    currentX = 0,
-    dragging = false;
-  const threshold = 90,
-    maxSlide = 110;
-
-  function pointerStart(x) {
-    startX = x;
-    currentX = x;
-    dragging = true;
-    contentEl.style.transition = 'none';
-  }
-
-  function pointerMove(x) {
-    if (!dragging) return;
-    currentX = x;
-    const diff = currentX - startX;
-    if (diff > 0) {
-      const px = Math.min(diff, maxSlide);
-      contentEl.style.transform = `translateX(${px}px)`;
-      if (px > 20) containerRow.classList.add('show-delete');
-      else containerRow.classList.remove('show-delete');
+function deleteTask(taskId) {
+  if (confirm('Are you sure you want to delete this task?')) {
+    tasks = tasks.filter(t => t.id !== taskId);
+    saveToStorage();
+    renderTasks();
+    updateStats();
+    
+    // Re-render history if in history view
+    if (document.getElementById('historySection').classList.contains('active')) {
+      renderHistory();
     }
   }
-
-  function pointerEnd() {
-    if (!dragging) return;
-    dragging = false;
-    contentEl.style.transition = 'transform .2s ease';
-    const diff = currentX - startX;
-    if (diff > threshold) {
-      contentEl.style.transform = `translateX(${maxSlide}px)`;
-      setTimeout(() => {
-        if (confirm(`Delete history for this task?`)) {
-          deleteTaskHistory(taskId);
-        } else {
-          containerRow.classList.remove('show-delete');
-          contentEl.style.transform = 'translateX(0)';
-        }
-      }, 220);
-    } else {
-      containerRow.classList.remove('show-delete');
-      contentEl.style.transform = 'translateX(0)';
-    }
-  }
-
-  contentEl.addEventListener('touchstart', (e) => pointerStart(e.touches[0].clientX), {
-    passive: true
-  });
-  contentEl.addEventListener('touchmove', (e) => pointerMove(e.touches[0].clientX), {
-    passive: true
-  });
-  contentEl.addEventListener('touchend', () => pointerEnd());
-  contentEl.addEventListener('mousedown', (e) => pointerStart(e.clientX));
-  window.addEventListener('mousemove', (e) => pointerMove(e.clientX));
-  window.addEventListener('mouseup', () => pointerEnd());
 }
 
-function openTaskHistoryModal(taskId) {
-  const histTask = taskHistory.find(h => h.taskId === taskId);
+function markTask(taskId, status) {
   const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
 
-  if (!histTask || !histTask.history || histTask.history.length === 0) {
-    alert('No history recorded for this task yet.');
+  const today = new Date().toDateString();
+  const existingIndex = task.history.findIndex(h => 
+    new Date(h.date).toDateString() === today
+  );
+
+  if (existingIndex >= 0) {
+    task.history[existingIndex].status = status;
+    task.history[existingIndex].date = new Date().toISOString();
+  } else {
+    task.history.push({
+      date: new Date().toISOString(),
+      status: status
+    });
+  }
+
+  saveToStorage();
+  renderTasks();
+  updateStats();
+}
+
+// ============================================
+// RENDERING
+// ============================================
+
+function renderTasks() {
+  const container = document.getElementById('tasksList');
+  const emptyState = document.getElementById('emptyState');
+  
+  const filteredTasks = tasks.filter(task => {
+    if (currentFilter === 'all') return true;
+    return task.category === currentFilter;
+  });
+
+  if (filteredTasks.length === 0) {
+    container.innerHTML = '';
+    emptyState.style.display = 'block';
     return;
   }
 
-  qs('taskHistoryTitle').textContent = `📈 ${task ? task.title : histTask.title}`;
-
-  const content = qs('taskHistoryContent');
-  content.innerHTML = '';
-
-  const statsDiv = document.createElement('div');
-  statsDiv.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px';
-
-  const completed = histTask.history.filter(h => h.status).length;
-  const total = histTask.history.length;
-  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-  const completedBox = document.createElement('div');
-  completedBox.className = 'stat-box';
-  completedBox.innerHTML = `<div class="stat-value">${completed}/${total}</div><div class="stat-label">Completed</div>`;
-
-  const percentBox = document.createElement('div');
-  percentBox.className = 'stat-box';
-  percentBox.innerHTML = `<div class="stat-value">${percentage}%</div><div class="stat-label">Success Rate</div>`;
-
-  statsDiv.appendChild(completedBox);
-  statsDiv.appendChild(percentBox);
-  content.appendChild(statsDiv);
-
-  // Create calendar
-  const calendarDiv = document.createElement('div');
-  calendarDiv.className = 'history-calendar';
-
-  const weekdaysDiv = document.createElement('div');
-  weekdaysDiv.className = 'weekdays';
-  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
-    const wd = document.createElement('div');
-    wd.className = 'weekday';
-    wd.textContent = day;
-    weekdaysDiv.appendChild(wd);
-  });
-  calendarDiv.appendChild(weekdaysDiv);
-
-  // Sort history by date
-  const sortedHistory = [...histTask.history].sort((a, b) => new Date(a.date) - new Date(b.date));
-
-  if (sortedHistory.length > 0) {
-    const firstDate = new Date(sortedHistory[0].date);
-    const lastDate = new Date(sortedHistory[sortedHistory.length - 1].date);
-
-    // Create a map for quick lookup
-    const historyMap = {};
-    sortedHistory.forEach(h => {
-      historyMap[h.date] = h.status;
-    });
-
-    const daysGrid = document.createElement('div');
-    daysGrid.className = 'days-grid';
-
-    // Start from first Sunday before or on first date
-    const startDate = new Date(firstDate);
-    startDate.setDate(startDate.getDate() - startDate.getDay());
-
-    // End on last Saturday after or on last date
-    const endDate = new Date(lastDate);
-    endDate.setDate(endDate.getDate() + (6 - endDate.getDay()));
-
-    let currentDate = new Date(startDate);
-    while (currentDate <= endDate) {
-      const dateStr = nowDateStr(currentDate);
-      const dayCell = document.createElement('div');
-      dayCell.className = 'day-cell';
-
-      const dayNum = document.createElement('div');
-      dayNum.className = 'day-num';
-      dayNum.textContent = currentDate.getDate();
-
-      const dayStatus = document.createElement('div');
-      dayStatus.className = 'day-status';
-
-      if (historyMap.hasOwnProperty(dateStr)) {
-        if (historyMap[dateStr]) {
-          dayCell.classList.add('completed');
-          dayStatus.textContent = '✅';
-        } else {
-          dayCell.classList.add('failed');
-          dayStatus.textContent = '❌';
-        }
-      } else {
-        if (currentDate < firstDate || currentDate > lastDate) {
-          dayCell.classList.add('empty');
-          dayStatus.textContent = '';
-        } else {
-          dayStatus.textContent = '—';
-        }
-      }
-
-      dayCell.appendChild(dayNum);
-      dayCell.appendChild(dayStatus);
-      daysGrid.appendChild(dayCell);
-
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    calendarDiv.appendChild(daysGrid);
-  }
-
-  content.appendChild(calendarDiv);
-  showModal('taskHistoryModal');
+  emptyState.style.display = 'none';
+  container.innerHTML = filteredTasks.map(task => createTaskHTML(task)).join('');
 }
 
-function updateStats() {
-  const totalTasks = tasks.length;
-  const todayStr = nowDateStr();
-  const todayKey = DAYS[new Date().getDay()];
-
-  // Count only TODAY's completed tasks
-  let todayCompleted = 0;
-  tasks.forEach(task => {
-    const currentStatus = (task.status && typeof task.status === 'object') ? task.status[todayKey] : null;
-    if (currentStatus === true) {
-      todayCompleted++;
-    }
-  });
-
-  // Count unique days with task history
-  const uniqueDates = new Set();
-  taskHistory.forEach(histTask => {
-    histTask.history.forEach(h => {
-      uniqueDates.add(h.date);
-    });
-  });
-
-  const daysTracked = uniqueDates.size;
-
-  qs('statTotalTasks').textContent = totalTasks;
-  qs('statCompleted').textContent = todayCompleted;
-  qs('statDaysTracked').textContent = daysTracked;
-}
-
-function updateHeaderStats() {
-  const todayKey = DAYS[new Date().getDay()];
-  let todayCompleted = 0;
-  let totalTasks = tasks.length;
-
-  tasks.forEach(task => {
-    const currentStatus = (task.status && typeof task.status === 'object') ? task.status[todayKey] : null;
-    if (currentStatus === true) {
-      todayCompleted++;
-    }
-  });
-
-  // Calculate streak
-  const streak = calculateStreak();
-
-  const statsSummary = qs('statsSummary');
-  statsSummary.innerHTML = `
-    <span>📊 ${todayCompleted}/${totalTasks} Done</span>
-    <span>🔥 ${streak} Day Streak</span>
+function createTaskHTML(task) {
+  const todayStatus = getTodayStatus(task);
+  const hasReminder = task.reminder !== null;
+  
+  return `
+    <div class="task-row" data-task-id="${task.id}">
+      <div class="swipe-delete" onclick="deleteTask(${task.id})">🗑️</div>
+      <div class="task-content" 
+           ontouchstart="handleTouchStart(event, ${task.id})"
+           ontouchmove="handleTouchMove(event)"
+           ontouchend="handleTouchEnd(event)">
+        <div class="task-title">${escapeHtml(task.text)}</div>
+        <div class="task-meta">
+          ${task.category ? `<span style="color: var(--text-muted); font-size: 0.85rem; font-weight: 500;">${capitalizeFirst(task.category)}</span>` : ''}
+          <span class="icon-bell" onclick="openReminderModal(${task.id})">
+            ${hasReminder ? '🔔' : '🔕'}
+            ${hasReminder ? '<span class="badge"></span>' : ''}
+          </span>
+          ${renderStatusActions(task.id, todayStatus)}
+        </div>
+      </div>
+    </div>
   `;
 }
 
-function calculateStreak() {
-  if (taskHistory.length === 0) return 0;
+function renderStatusActions(taskId, status) {
+  if (status === 'completed') {
+    return '<span class="status-badge done">✓</span>';
+  } else if (status === 'failed') {
+    return '<span class="status-badge failed">✗</span>';
+  } else {
+    return `
+      <div class="status-actions">
+        <button class="btn-status btn-yes" onclick="markTask(${taskId}, 'completed')">Yes</button>
+        <button class="btn-status btn-no" onclick="markTask(${taskId}, 'failed')">No</button>
+      </div>
+    `;
+  }
+}
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+function getTodayStatus(task) {
+  const today = new Date().toDateString();
+  const todayHistory = task.history.find(h => 
+    new Date(h.date).toDateString() === today
+  );
+  return todayHistory ? todayHistory.status : 'pending';
+}
 
-  // Collect all dates where at least one task was completed
-  const completedDates = new Set();
-  taskHistory.forEach(histTask => {
-    histTask.history.forEach(h => {
-      if (h.status) {
-        completedDates.add(h.date);
+// ============================================
+// TOUCH GESTURES (Mobile Swipe)
+// ============================================
+
+function handleTouchStart(event, taskId) {
+  touchStartX = event.touches[0].clientX;
+  isSwiping = true;
+  currentSwipeElement = event.currentTarget.parentElement;
+}
+
+function handleTouchMove(event) {
+  if (!isSwiping) return;
+  
+  touchCurrentX = event.touches[0].clientX;
+  const diff = touchStartX - touchCurrentX;
+
+  if (diff > 50) {
+    currentSwipeElement.classList.add('show-delete');
+  } else {
+    currentSwipeElement.classList.remove('show-delete');
+  }
+}
+
+function handleTouchEnd(event) {
+  isSwiping = false;
+  
+  // Auto-hide after 2 seconds
+  setTimeout(() => {
+    if (currentSwipeElement) {
+      currentSwipeElement.classList.remove('show-delete');
+    }
+  }, 2000);
+}
+
+// ============================================
+// REMINDERS
+// ============================================
+
+function openReminderModal(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  currentReminderTaskId = taskId;
+  document.getElementById('reminderFor').textContent = `Reminder for: ${task.text}`;
+  
+  if (task.reminder) {
+    const time = new Date(task.reminder.time);
+    let hours = time.getHours();
+    const minutes = time.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    
+    document.getElementById('remHour').value = hours;
+    document.getElementById('remMin').value = minutes.toString().padStart(2, '0');
+    document.getElementById('remNote').value = task.reminder.note || '';
+    toggleAMPM(ampm);
+  } else {
+    const now = new Date();
+    let hours = now.getHours();
+    const minutes = now.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    
+    document.getElementById('remHour').value = hours;
+    document.getElementById('remMin').value = minutes.toString().padStart(2, '0');
+    document.getElementById('remNote').value = '';
+    toggleAMPM(ampm);
+  }
+
+  document.getElementById('reminderModal').classList.add('show');
+}
+
+function closeReminderModal() {
+  document.getElementById('reminderModal').classList.remove('show');
+  currentReminderTaskId = null;
+}
+
+function toggleAMPM(period) {
+  document.getElementById('ampmAM').classList.toggle('active', period === 'AM');
+  document.getElementById('ampmPM').classList.toggle('active', period === 'PM');
+}
+
+function saveReminder() {
+  const task = tasks.find(t => t.id === currentReminderTaskId);
+  if (!task) return;
+
+  const hourInput = document.getElementById('remHour').value;
+  const minInput = document.getElementById('remMin').value;
+  
+  if (!hourInput || !minInput) {
+    alert('Please enter a valid time');
+    return;
+  }
+
+  let hours = parseInt(hourInput);
+  const minutes = parseInt(minInput);
+  const isPM = document.getElementById('ampmPM').classList.contains('active');
+  const note = document.getElementById('remNote').value.trim();
+
+  // Convert to 24-hour format
+  if (isPM && hours !== 12) hours += 12;
+  if (!isPM && hours === 12) hours = 0;
+
+  const now = new Date();
+  const reminderTime = new Date(
+    now.getFullYear(), 
+    now.getMonth(), 
+    now.getDate(), 
+    hours, 
+    minutes
+  );
+
+  // If time has passed today, set for tomorrow
+  if (reminderTime < now) {
+    reminderTime.setDate(reminderTime.getDate() + 1);
+  }
+
+  task.reminder = {
+    time: reminderTime.toISOString(),
+    note: note,
+    notified: false
+  };
+
+  saveToStorage();
+  renderTasks();
+  closeReminderModal();
+  
+  alert('Reminder set successfully!');
+}
+
+function checkReminders() {
+  const now = new Date();
+  let hasChanges = false;
+  
+  tasks.forEach(task => {
+    if (task.reminder && !task.reminder.notified) {
+      const reminderTime = new Date(task.reminder.time);
+      
+      if (now >= reminderTime) {
+        showNotification(task);
+        task.reminder.notified = true;
+        hasChanges = true;
       }
+    }
+  });
+  
+  if (hasChanges) {
+    saveToStorage();
+    renderTasks();
+  }
+}
+
+function showNotification(task) {
+  const message = task.reminder.note 
+    ? `${task.text}\n\n${task.reminder.note}`
+    : task.text;
+  
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('Task Reminder 🔔', { 
+      body: message,
+      icon: '🔔'
+    });
+  } else {
+    alert(`⏰ Task Reminder:\n\n${message}`);
+  }
+}
+
+// ============================================
+// STATISTICS
+// ============================================
+
+function updateStats() {
+  const today = new Date().toDateString();
+  
+  const completedToday = tasks.filter(task => {
+    const todayHistory = task.history.find(h => 
+      new Date(h.date).toDateString() === today
+    );
+    return todayHistory && todayHistory.status === 'completed';
+  }).length;
+
+  const totalToday = tasks.length;
+  const streak = calculateStreak();
+
+  // Update header stats
+  document.getElementById('statsSummary').innerHTML = `
+    <span>${completedToday}/${totalToday} Done</span>
+    <span>${streak} Day Streak</span>
+  `;
+
+  // Update history page stats
+  document.getElementById('statTotalTasks').textContent = tasks.length;
+  document.getElementById('statCompleted').textContent = completedToday;
+  
+  const uniqueDays = new Set();
+  tasks.forEach(task => {
+    task.history.forEach(h => {
+      uniqueDays.add(new Date(h.date).toDateString());
     });
   });
+  document.getElementById('statDaysTracked').textContent = uniqueDays.size;
+}
 
-  // Convert to array and sort
-  const sortedDates = Array.from(completedDates).sort().reverse();
-
-  if (sortedDates.length === 0) return 0;
+function calculateStreak() {
+  if (tasks.length === 0) return 0;
 
   let streak = 0;
-  let currentDate = new Date(today);
+  let currentDate = new Date();
+  currentDate.setHours(0, 0, 0, 0);
+  
+  while (true) {
+    const dateStr = currentDate.toDateString();
+    
+    // Check if all tasks were completed on this date
+    const allCompleted = tasks.every(task => {
+      const history = task.history.find(h => 
+        new Date(h.date).toDateString() === dateStr
+      );
+      return history && history.status === 'completed';
+    });
 
-  for (let i = 0; i < sortedDates.length; i++) {
-    const dateStr = nowDateStr(currentDate);
-    if (sortedDates.includes(dateStr)) {
-      streak++;
-      currentDate.setDate(currentDate.getDate() - 1);
-    } else {
-      break;
-    }
+    if (!allCompleted) break;
+    
+    streak++;
+    currentDate.setDate(currentDate.getDate() - 1);
+    
+    // Prevent infinite loop
+    if (streak > 1000) break;
   }
 
   return streak;
 }
 
-// Modal functions
-function showModal(id) {
-  qs(id).classList.add('show');
+// ============================================
+// NAVIGATION
+// ============================================
+
+function switchView(view) {
+  // Update nav buttons
+  document.getElementById('navTasks').classList.toggle('active', view === 'tasks');
+  document.getElementById('navHistory').classList.toggle('active', view === 'history');
+  
+  // Show/hide views
+  document.getElementById('tasksView').style.display = view === 'tasks' ? 'block' : 'none';
+  document.getElementById('historySection').classList.toggle('active', view === 'history');
+
+  if (view === 'history') {
+    renderHistory();
+  }
 }
 
-function hideModal(id) {
-  qs(id).classList.remove('show');
+// ============================================
+// HISTORY VIEW
+// ============================================
+
+function renderHistory() {
+  const container = document.getElementById('taskHistoryList');
+  const noHistory = document.getElementById('noHistory');
+
+  if (tasks.length === 0 || tasks.every(t => t.history.length === 0)) {
+    container.innerHTML = '';
+    noHistory.style.display = 'block';
+    return;
+  }
+
+  noHistory.style.display = 'none';
+  container.innerHTML = tasks.map(task => createHistoryItemHTML(task)).join('');
 }
 
-// UI event handlers
-function attachUI() {
-  qs('addBtn').addEventListener('click', addTaskFromInput);
-  qs('taskInput').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') addTaskFromInput();
-  });
+function createHistoryItemHTML(task) {
+  const completed = task.history.filter(h => h.status === 'completed').length;
+  const failed = task.history.filter(h => h.status === 'failed').length;
+  const total = task.history.length;
+  const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-  qs('ampmAM').addEventListener('click', () => {
-    qs('ampmAM').classList.add('active');
-    qs('ampmPM').classList.remove('active');
-  });
-
-  qs('ampmPM').addEventListener('click', () => {
-    qs('ampmPM').classList.add('active');
-    qs('ampmAM').classList.remove('active');
-  });
-
-  qs('remSave').addEventListener('click', saveReminderForCurrent);
-  qs('remCancel').addEventListener('click', () => hideModal('reminderModal'));
-  qs('closeTaskHistory').addEventListener('click', () => hideModal('taskHistoryModal'));
-
-  // Navigation
-  qs('navTasks').addEventListener('click', () => {
-    qs('navTasks').classList.add('active');
-    qs('navHistory').classList.remove('active');
-    qs('tasksView').style.display = 'block';
-    qs('historySection').classList.remove('active');
-  });
-
-  qs('navHistory').addEventListener('click', () => {
-    qs('navHistory').classList.add('active');
-    qs('navTasks').classList.remove('active');
-    qs('tasksView').style.display = 'none';
-    qs('historySection').classList.add('active');
-    renderHistoryView();
-    updateStats();
-  });
-
-  // Close modals on background click
-  qs('reminderModal').addEventListener('click', (e) => {
-    if (e.target === qs('reminderModal')) hideModal('reminderModal');
-  });
-
-  qs('taskHistoryModal').addEventListener('click', (e) => {
-    if (e.target === qs('taskHistoryModal')) hideModal('taskHistoryModal');
-  });
-
-  // Filter buttons
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      filterTasks(btn.dataset.filter);
-    });
-  });
+  return `
+    <div class="history-item-row" data-task-id="${task.id}">
+      <div class="history-delete" onclick="deleteTask(${task.id})">🗑️</div>
+      <div class="task-history-item" onclick="showTaskHistory(${task.id})">
+        <div class="task-history-title">${escapeHtml(task.text)}</div>
+        <div class="task-history-stats">
+          <span class="task-history-stat">✓ ${completed} completed</span>
+          <span class="task-history-stat">✗ ${failed} failed</span>
+          <span class="task-history-stat">📊 ${rate}% success rate</span>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
-// Timer functions
-function startTickers() {
-  setInterval(() => {
-    updateCurrentDate();
-    checkDailyReset();
-  }, 60000); // Check every minute
+function showTaskHistory(taskId) {
+  const task = tasks.find(t => t.id === taskId);
+  if (!task) return;
 
-  // Check reminders every 30 seconds
-  setInterval(() => {
-    checkReminders();
-  }, 30000);
-
-  // Initial check
-  checkReminders();
+  document.getElementById('taskHistoryTitle').textContent = task.text;
+  
+  const calendar = generateCalendar(task);
+  document.getElementById('taskHistoryContent').innerHTML = calendar;
+  document.getElementById('taskHistoryModal').classList.add('show');
 }
 
-function checkReminders() {
-  const now = new Date();
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
+function closeTaskHistoryModal() {
+  document.getElementById('taskHistoryModal').classList.remove('show');
+}
 
-  tasks.forEach(task => {
-    if (!task.reminder || task.reminderShown) return;
+function generateCalendar(task) {
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const startDay = firstDay.getDay();
+  const totalDays = lastDay.getDate();
 
-    let reminderHour = task.reminder.hour;
-    if (task.reminder.ampm === 'PM' && reminderHour !== 12) {
-      reminderHour += 12;
-    } else if (task.reminder.ampm === 'AM' && reminderHour === 12) {
-      reminderHour = 0;
+  let html = '<div class="history-calendar">';
+  
+  // Weekday headers
+  html += '<div class="weekdays">';
+  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
+    html += `<div class="weekday">${day}</div>`;
+  });
+  html += '</div>';
+  
+  // Days grid
+  html += '<div class="days-grid">';
+
+  // Empty cells before first day of month
+  for (let i = 0; i < startDay; i++) {
+    html += '<div class="day-cell empty"></div>';
+  }
+
+  // Days of the month
+  for (let day = 1; day <= totalDays; day++) {
+    const date = new Date(today.getFullYear(), today.getMonth(), day);
+    const dateStr = date.toDateString();
+    const history = task.history.find(h => 
+      new Date(h.date).toDateString() === dateStr
+    );
+    
+    let className = 'day-cell';
+    let emoji = '';
+    
+    if (history) {
+      if (history.status === 'completed') {
+        className += ' completed';
+        emoji = '✓';
+      } else if (history.status === 'failed') {
+        className += ' failed';
+        emoji = '✗';
+      }
     }
 
-    const reminderMinute = task.reminder.minute;
+    html += `
+      <div class="${className}">
+        <div class="day-num">${day}</div>
+        <div class="day-status">${emoji}</div>
+      </div>
+    `;
+  }
 
-    // Calculate 1 minute before reminder time
-    let alertHour = reminderHour;
-    let alertMinute = reminderMinute - 1;
+  html += '</div></div>';
+  return html;
+}
 
-    if (alertMinute < 0) {
-      alertMinute = 59;
-      alertHour -= 1;
-      if (alertHour < 0) alertHour = 23;
-    }
+// ============================================
+// DATE & TIME
+// ============================================
 
-    // Check if current time matches alert time (1 minute before)
-    if (currentHour === alertHour && currentMinute === alertMinute) {
-      const noteText = task.reminder.note ? `\n\nNote: ${task.reminder.note}` : '';
-      const timeStr = `${task.reminder.hour}:${String(task.reminder.minute).padStart(2, '0')} ${task.reminder.ampm}`;
-      alert(`⏰ Reminder: ${task.title}\n\nScheduled for: ${timeStr}${noteText}`);
-      task.reminderShown = true;
-      saveAll();
-    }
+function updateCurrentDate() {
+  const options = { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  };
+  const dateStr = new Date().toLocaleDateString('en-US', options);
+  document.getElementById('currentDate').textContent = dateStr;
+  
+  const today = new Date().toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric' 
   });
+  document.getElementById('todayHeader').textContent = today;
 }
 
-// Initialize app when DOM is loaded
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
+// ============================================
+// LOCAL STORAGE
+// ============================================
+
+function saveToStorage() {
+  try {
+    localStorage.setItem('dailyTaskTracker', JSON.stringify(tasks));
+  } catch (e) {
+    console.error('Error saving to localStorage:', e);
+    alert('Error saving data. Your browser storage might be full.');
+  }
 }
+
+function loadFromStorage() {
+  try {
+    const stored = localStorage.getItem('dailyTaskTracker');
+    if (stored) {
+      tasks = JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error('Error loading from localStorage:', e);
+    tasks = [];
+  }
+}
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function capitalizeFirst(str) {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+// ============================================
+// MAKE FUNCTIONS GLOBALLY ACCESSIBLE
+// ============================================
+
+window.markTask = markTask;
+window.deleteTask = deleteTask;
+window.openReminderModal = openReminderModal;
+window.showTaskHistory = showTaskHistory;
+window.handleTouchStart = handleTouchStart;
+window.handleTouchMove = handleTouchMove;
+window.handleTouchEnd = handleTouchEnd;
+
