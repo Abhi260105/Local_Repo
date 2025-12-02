@@ -685,3 +685,4 @@ window.handleTouchStart = handleTouchStart;
 window.handleTouchMove = handleTouchMove;
 window.handleTouchEnd = handleTouchEnd;
 
+console.log('Daily Task Tracker loaded successfully! 🚀');
