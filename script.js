@@ -1,11 +1,11 @@
-
-
 // ============================================
-// DAILY TASK TRACKER - Complete JavaScript
+// DAILY TASK TRACKER - Main JavaScript with Database
 // ============================================
 
 // State Management
 let tasks = [];
+let allHistory = [];
+let allReminders = [];
 let currentFilter = 'all';
 let currentReminderTaskId = null;
 let touchStartX = 0;
@@ -17,35 +17,59 @@ let currentSwipeElement = null;
 // INITIALIZATION
 // ============================================
 
-document.addEventListener('DOMContentLoaded', () => {
-  loadFromStorage();
-  initEventListeners();
-  updateCurrentDate();
-  renderTasks();
-  updateStats();
-  checkReminders();
-  
-  // Check reminders every minute
-  setInterval(checkReminders, 60000);
-  
-  // Request notification permission if available
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await DB.init();
+    await loadFromDatabase();
+    initEventListeners();
+    updateCurrentDate();
+    renderTasks();
+    updateStats();
+    renderActivityHeatmap();
+    checkReminders();
+    
+    // Check reminders every minute
+    setInterval(checkReminders, 60000);
+    
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  } catch (error) {
+    console.error('Initialization error:', error);
+    alert('Error initializing application. Please refresh the page.');
   }
 });
+
+// ============================================
+// DATABASE LOADING
+// ============================================
+
+async function loadFromDatabase() {
+  try {
+    tasks = await DB.tasks.getAll();
+    allHistory = await DB.history.getAll();
+    allReminders = await DB.reminders.getAll();
+    
+    console.log('Loaded from database:', { tasks: tasks.length, history: allHistory.length });
+  } catch (error) {
+    console.error('Error loading from database:', error);
+    tasks = [];
+    allHistory = [];
+    allReminders = [];
+  }
+}
 
 // ============================================
 // EVENT LISTENERS
 // ============================================
 
 function initEventListeners() {
-  // Add task
   document.getElementById('addBtn').addEventListener('click', addTask);
   document.getElementById('taskInput').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') addTask();
   });
 
-  // Filter buttons
   document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -55,28 +79,24 @@ function initEventListeners() {
     });
   });
 
-  // Navigation
   document.getElementById('navTasks').addEventListener('click', () => switchView('tasks'));
   document.getElementById('navHistory').addEventListener('click', () => switchView('history'));
+  document.getElementById('navActivity').addEventListener('click', () => switchView('activity'));
 
-  // Reminder modal controls
   document.getElementById('remCancel').addEventListener('click', closeReminderModal);
   document.getElementById('remSave').addEventListener('click', saveReminder);
   document.getElementById('reminderModal').addEventListener('click', (e) => {
     if (e.target.id === 'reminderModal') closeReminderModal();
   });
 
-  // AM/PM toggle buttons
   document.getElementById('ampmAM').addEventListener('click', () => toggleAMPM('AM'));
   document.getElementById('ampmPM').addEventListener('click', () => toggleAMPM('PM'));
 
-  // Task history modal
   document.getElementById('closeTaskHistory').addEventListener('click', closeTaskHistoryModal);
   document.getElementById('taskHistoryModal').addEventListener('click', (e) => {
     if (e.target.id === 'taskHistoryModal') closeTaskHistoryModal();
   });
 
-  // Time input validation
   document.getElementById('remHour').addEventListener('input', (e) => {
     let val = parseInt(e.target.value);
     if (isNaN(val)) {
@@ -100,7 +120,6 @@ function initEventListeners() {
     if (numVal > 59) e.target.value = '59';
     if (numVal < 0) e.target.value = '00';
     
-    // Pad with zero if single digit
     if (e.target.value.length === 1 && numVal >= 0 && numVal <= 9) {
       e.target.value = '0' + e.target.value;
     }
@@ -111,7 +130,7 @@ function initEventListeners() {
 // TASK MANAGEMENT
 // ============================================
 
-function addTask() {
+async function addTask() {
   const input = document.getElementById('taskInput');
   const categorySelect = document.getElementById('categorySelect');
   const text = input.value.trim();
@@ -127,56 +146,80 @@ function addTask() {
     text,
     category: category || 'personal',
     status: 'pending',
-    createdAt: new Date().toISOString(),
-    reminder: null,
-    history: []
+    createdAt: new Date().toISOString()
   };
 
-  tasks.push(task);
-  input.value = '';
-  categorySelect.value = '';
-  
-  saveToStorage();
-  renderTasks();
-  updateStats();
-}
-
-function deleteTask(taskId) {
-  if (confirm('Are you sure you want to delete this task?')) {
-    tasks = tasks.filter(t => t.id !== taskId);
-    saveToStorage();
+  try {
+    await DB.tasks.add(task);
+    tasks.push(task);
+    
+    input.value = '';
+    categorySelect.value = '';
+    
     renderTasks();
     updateStats();
-    
-    // Re-render history if in history view
-    if (document.getElementById('historySection').classList.contains('active')) {
-      renderHistory();
+    renderActivityHeatmap();
+  } catch (error) {
+    console.error('Error adding task:', error);
+    alert('Error adding task. Please try again.');
+  }
+}
+
+async function deleteTask(taskId) {
+  if (confirm('Are you sure you want to delete this task?')) {
+    try {
+      await DB.tasks.delete(taskId);
+      await DB.history.deleteByTaskId(taskId);
+      await DB.reminders.delete(taskId);
+      
+      tasks = tasks.filter(t => t.id !== taskId);
+      allHistory = allHistory.filter(h => h.taskId !== taskId);
+      allReminders = allReminders.filter(r => r.taskId !== taskId);
+      
+      renderTasks();
+      updateStats();
+      renderActivityHeatmap();
+      
+      if (document.getElementById('historySection').classList.contains('active')) {
+        renderHistory();
+      }
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      alert('Error deleting task. Please try again.');
     }
   }
 }
 
-function markTask(taskId, status) {
-  const task = tasks.find(t => t.id === taskId);
-  if (!task) return;
+async function markTask(taskId, status) {
+  try {
+    const today = new Date().toDateString();
+    
+    const existingEntry = allHistory.find(h => 
+      h.taskId === taskId && new Date(h.date).toDateString() === today
+    );
 
-  const today = new Date().toDateString();
-  const existingIndex = task.history.findIndex(h => 
-    new Date(h.date).toDateString() === today
-  );
+    if (existingEntry) {
+      existingEntry.status = status;
+      existingEntry.date = new Date().toISOString();
+      await DB.history.update(existingEntry);
+    } else {
+      const newEntry = {
+        taskId: taskId,
+        date: new Date().toISOString(),
+        status: status
+      };
+      const id = await DB.history.add(newEntry);
+      newEntry.id = id;
+      allHistory.push(newEntry);
+    }
 
-  if (existingIndex >= 0) {
-    task.history[existingIndex].status = status;
-    task.history[existingIndex].date = new Date().toISOString();
-  } else {
-    task.history.push({
-      date: new Date().toISOString(),
-      status: status
-    });
+    renderTasks();
+    updateStats();
+    renderActivityHeatmap();
+  } catch (error) {
+    console.error('Error marking task:', error);
+    alert('Error updating task status. Please try again.');
   }
-
-  saveToStorage();
-  renderTasks();
-  updateStats();
 }
 
 // ============================================
@@ -204,7 +247,8 @@ function renderTasks() {
 
 function createTaskHTML(task) {
   const todayStatus = getTodayStatus(task);
-  const hasReminder = task.reminder !== null;
+  const reminder = allReminders.find(r => r.taskId === task.id);
+  const hasReminder = reminder !== null;
   
   return `
     <div class="task-row" data-task-id="${task.id}">
@@ -244,14 +288,14 @@ function renderStatusActions(taskId, status) {
 
 function getTodayStatus(task) {
   const today = new Date().toDateString();
-  const todayHistory = task.history.find(h => 
-    new Date(h.date).toDateString() === today
+  const todayHistory = allHistory.find(h => 
+    h.taskId === task.id && new Date(h.date).toDateString() === today
   );
   return todayHistory ? todayHistory.status : 'pending';
 }
 
 // ============================================
-// TOUCH GESTURES (Mobile Swipe)
+// TOUCH GESTURES
 // ============================================
 
 function handleTouchStart(event, taskId) {
@@ -276,7 +320,6 @@ function handleTouchMove(event) {
 function handleTouchEnd(event) {
   isSwiping = false;
   
-  // Auto-hide after 2 seconds
   setTimeout(() => {
     if (currentSwipeElement) {
       currentSwipeElement.classList.remove('show-delete');
@@ -288,15 +331,17 @@ function handleTouchEnd(event) {
 // REMINDERS
 // ============================================
 
-function openReminderModal(taskId) {
+async function openReminderModal(taskId) {
   const task = tasks.find(t => t.id === taskId);
   if (!task) return;
 
   currentReminderTaskId = taskId;
   document.getElementById('reminderFor').textContent = `Reminder for: ${task.text}`;
   
-  if (task.reminder) {
-    const time = new Date(task.reminder.time);
+  const reminder = allReminders.find(r => r.taskId === taskId);
+  
+  if (reminder) {
+    const time = new Date(reminder.time);
     let hours = time.getHours();
     const minutes = time.getMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
@@ -304,7 +349,7 @@ function openReminderModal(taskId) {
     
     document.getElementById('remHour').value = hours;
     document.getElementById('remMin').value = minutes.toString().padStart(2, '0');
-    document.getElementById('remNote').value = task.reminder.note || '';
+    document.getElementById('remNote').value = reminder.note || '';
     toggleAMPM(ampm);
   } else {
     const now = new Date();
@@ -332,7 +377,7 @@ function toggleAMPM(period) {
   document.getElementById('ampmPM').classList.toggle('active', period === 'PM');
 }
 
-function saveReminder() {
+async function saveReminder() {
   const task = tasks.find(t => t.id === currentReminderTaskId);
   if (!task) return;
 
@@ -349,7 +394,6 @@ function saveReminder() {
   const isPM = document.getElementById('ampmPM').classList.contains('active');
   const note = document.getElementById('remNote').value.trim();
 
-  // Convert to 24-hour format
   if (isPM && hours !== 12) hours += 12;
   if (!isPM && hours === 12) hours = 0;
 
@@ -362,49 +406,64 @@ function saveReminder() {
     minutes
   );
 
-  // If time has passed today, set for tomorrow
   if (reminderTime < now) {
     reminderTime.setDate(reminderTime.getDate() + 1);
   }
 
-  task.reminder = {
+  const reminder = {
+    taskId: currentReminderTaskId,
     time: reminderTime.toISOString(),
     note: note,
     notified: false
   };
 
-  saveToStorage();
-  renderTasks();
-  closeReminderModal();
-  
-  alert('Reminder set successfully!');
+  try {
+    await DB.reminders.set(reminder);
+    
+    const existingIndex = allReminders.findIndex(r => r.taskId === currentReminderTaskId);
+    if (existingIndex >= 0) {
+      allReminders[existingIndex] = reminder;
+    } else {
+      allReminders.push(reminder);
+    }
+    
+    renderTasks();
+    closeReminderModal();
+    alert('Reminder set successfully!');
+  } catch (error) {
+    console.error('Error saving reminder:', error);
+    alert('Error saving reminder. Please try again.');
+  }
 }
 
-function checkReminders() {
+async function checkReminders() {
   const now = new Date();
   let hasChanges = false;
   
-  tasks.forEach(task => {
-    if (task.reminder && !task.reminder.notified) {
-      const reminderTime = new Date(task.reminder.time);
+  for (let reminder of allReminders) {
+    if (!reminder.notified) {
+      const reminderTime = new Date(reminder.time);
       
       if (now >= reminderTime) {
-        showNotification(task);
-        task.reminder.notified = true;
-        hasChanges = true;
+        const task = tasks.find(t => t.id === reminder.taskId);
+        if (task) {
+          showNotification(task, reminder);
+          reminder.notified = true;
+          await DB.reminders.set(reminder);
+          hasChanges = true;
+        }
       }
     }
-  });
+  }
   
   if (hasChanges) {
-    saveToStorage();
     renderTasks();
   }
 }
 
-function showNotification(task) {
-  const message = task.reminder.note 
-    ? `${task.text}\n\n${task.reminder.note}`
+function showNotification(task, reminder) {
+  const message = reminder.note 
+    ? `${task.text}\n\n${reminder.note}`
     : task.text;
   
   if ('Notification' in window && Notification.permission === 'granted') {
@@ -424,31 +483,24 @@ function showNotification(task) {
 function updateStats() {
   const today = new Date().toDateString();
   
-  const completedToday = tasks.filter(task => {
-    const todayHistory = task.history.find(h => 
-      new Date(h.date).toDateString() === today
-    );
-    return todayHistory && todayHistory.status === 'completed';
+  const completedToday = allHistory.filter(h => {
+    return new Date(h.date).toDateString() === today && h.status === 'completed';
   }).length;
 
   const totalToday = tasks.length;
   const streak = calculateStreak();
 
-  // Update header stats
   document.getElementById('statsSummary').innerHTML = `
     <span>${completedToday}/${totalToday} Done</span>
     <span>${streak} Day Streak</span>
   `;
 
-  // Update history page stats
   document.getElementById('statTotalTasks').textContent = tasks.length;
   document.getElementById('statCompleted').textContent = completedToday;
   
   const uniqueDays = new Set();
-  tasks.forEach(task => {
-    task.history.forEach(h => {
-      uniqueDays.add(new Date(h.date).toDateString());
-    });
+  allHistory.forEach(h => {
+    uniqueDays.add(new Date(h.date).toDateString());
   });
   document.getElementById('statDaysTracked').textContent = uniqueDays.size;
 }
@@ -463,20 +515,15 @@ function calculateStreak() {
   while (true) {
     const dateStr = currentDate.toDateString();
     
-    // Check if all tasks were completed on this date
-    const allCompleted = tasks.every(task => {
-      const history = task.history.find(h => 
-        new Date(h.date).toDateString() === dateStr
-      );
-      return history && history.status === 'completed';
-    });
+    const completedTasks = allHistory.filter(h => 
+      new Date(h.date).toDateString() === dateStr && h.status === 'completed'
+    ).length;
 
-    if (!allCompleted) break;
+    if (completedTasks !== tasks.length) break;
     
     streak++;
     currentDate.setDate(currentDate.getDate() - 1);
     
-    // Prevent infinite loop
     if (streak > 1000) break;
   }
 
@@ -484,20 +531,83 @@ function calculateStreak() {
 }
 
 // ============================================
+// ACTIVITY HEATMAP
+// ============================================
+
+function renderActivityHeatmap() {
+  const container = document.getElementById('activityHeatmap');
+  const weeks = 20; // Show last 20 weeks
+  const today = new Date();
+  
+  // Calculate start date (weeks ago from today)
+  const startDate = new Date(today);
+  startDate.setDate(startDate.getDate() - (weeks * 7));
+  startDate.setHours(0, 0, 0, 0);
+  
+  // Group history by date
+  const activityByDate = {};
+  allHistory.forEach(h => {
+    if (h.status === 'completed') {
+      const dateStr = new Date(h.date).toDateString();
+      activityByDate[dateStr] = (activityByDate[dateStr] || 0) + 1;
+    }
+  });
+  
+  // Find max activities for color scaling
+  const maxActivities = Math.max(...Object.values(activityByDate), 1);
+  
+  let html = '<div class="heatmap-grid">';
+  
+  // Generate cells for each day
+  for (let i = 0; i < weeks * 7; i++) {
+    const date = new Date(startDate);
+    date.setDate(date.getDate() + i);
+    const dateStr = date.toDateString();
+    
+    const count = activityByDate[dateStr] || 0;
+    const level = getActivityLevel(count, maxActivities);
+    
+    const isToday = dateStr === today.toDateString();
+    const dayLabel = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    
+    html += `
+      <div class="heatmap-cell level-${level} ${isToday ? 'today' : ''}" 
+           title="${dayLabel}: ${count} completed"
+           data-count="${count}">
+      </div>
+    `;
+  }
+  
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function getActivityLevel(count, max) {
+  if (count === 0) return 0;
+  const percentage = count / max;
+  if (percentage <= 0.25) return 1;
+  if (percentage <= 0.50) return 2;
+  if (percentage <= 0.75) return 3;
+  return 4;
+}
+
+// ============================================
 // NAVIGATION
 // ============================================
 
 function switchView(view) {
-  // Update nav buttons
   document.getElementById('navTasks').classList.toggle('active', view === 'tasks');
   document.getElementById('navHistory').classList.toggle('active', view === 'history');
+  document.getElementById('navActivity').classList.toggle('active', view === 'activity');
   
-  // Show/hide views
   document.getElementById('tasksView').style.display = view === 'tasks' ? 'block' : 'none';
   document.getElementById('historySection').classList.toggle('active', view === 'history');
+  document.getElementById('activitySection').classList.toggle('active', view === 'activity');
 
   if (view === 'history') {
     renderHistory();
+  } else if (view === 'activity') {
+    renderActivityHeatmap();
   }
 }
 
@@ -509,7 +619,7 @@ function renderHistory() {
   const container = document.getElementById('taskHistoryList');
   const noHistory = document.getElementById('noHistory');
 
-  if (tasks.length === 0 || tasks.every(t => t.history.length === 0)) {
+  if (tasks.length === 0 || allHistory.length === 0) {
     container.innerHTML = '';
     noHistory.style.display = 'block';
     return;
@@ -520,9 +630,10 @@ function renderHistory() {
 }
 
 function createHistoryItemHTML(task) {
-  const completed = task.history.filter(h => h.status === 'completed').length;
-  const failed = task.history.filter(h => h.status === 'failed').length;
-  const total = task.history.length;
+  const taskHistory = allHistory.filter(h => h.taskId === task.id);
+  const completed = taskHistory.filter(h => h.status === 'completed').length;
+  const failed = taskHistory.filter(h => h.status === 'failed').length;
+  const total = taskHistory.length;
   const rate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return `
@@ -564,27 +675,23 @@ function generateCalendar(task) {
 
   let html = '<div class="history-calendar">';
   
-  // Weekday headers
   html += '<div class="weekdays">';
   ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(day => {
     html += `<div class="weekday">${day}</div>`;
   });
   html += '</div>';
   
-  // Days grid
   html += '<div class="days-grid">';
 
-  // Empty cells before first day of month
   for (let i = 0; i < startDay; i++) {
     html += '<div class="day-cell empty"></div>';
   }
 
-  // Days of the month
   for (let day = 1; day <= totalDays; day++) {
     const date = new Date(today.getFullYear(), today.getMonth(), day);
     const dateStr = date.toDateString();
-    const history = task.history.find(h => 
-      new Date(h.date).toDateString() === dateStr
+    const history = allHistory.find(h => 
+      h.taskId === task.id && new Date(h.date).toDateString() === dateStr
     );
     
     let className = 'day-cell';
@@ -631,31 +738,6 @@ function updateCurrentDate() {
     day: 'numeric' 
   });
   document.getElementById('todayHeader').textContent = today;
-}
-
-// ============================================
-// LOCAL STORAGE
-// ============================================
-
-function saveToStorage() {
-  try {
-    localStorage.setItem('dailyTaskTracker', JSON.stringify(tasks));
-  } catch (e) {
-    console.error('Error saving to localStorage:', e);
-    alert('Error saving data. Your browser storage might be full.');
-  }
-}
-
-function loadFromStorage() {
-  try {
-    const stored = localStorage.getItem('dailyTaskTracker');
-    if (stored) {
-      tasks = JSON.parse(stored);
-    }
-  } catch (e) {
-    console.error('Error loading from localStorage:', e);
-    tasks = [];
-  }
 }
 
 // ============================================
