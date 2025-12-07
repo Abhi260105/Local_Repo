@@ -13,6 +13,13 @@
   --shadow: rgba(0, 0, 0, 0.04);
   --shadow-hover: rgba(0, 0, 0, 0.08);
   --radius: 12px;
+  
+  /* Heatmap colors */
+  --heatmap-empty: #ebedf0;
+  --heatmap-level-1: #9be9a8;
+  --heatmap-level-2: #40c463;
+  --heatmap-level-3: #30a14e;
+  --heatmap-level-4: #216e39;
 }
 
 * {
@@ -365,11 +372,13 @@ body {
   color: var(--danger);
 }
 
-.history-section {
+.history-section,
+.activity-section {
   display: none;
 }
 
-.history-section.active {
+.history-section.active,
+.activity-section.active {
   display: block;
 }
 
@@ -565,6 +574,108 @@ body {
   opacity: 0.3;
   border-style: dashed;
 }
+
+/* ============================================
+   ACTIVITY HEATMAP STYLES
+   ============================================ */
+
+.heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 20px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.legend-colors {
+  display: flex;
+  gap: 4px;
+}
+
+.legend-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.legend-box.level-0 {
+  background: var(--heatmap-empty);
+}
+
+.legend-box.level-1 {
+  background: var(--heatmap-level-1);
+}
+
+.legend-box.level-2 {
+  background: var(--heatmap-level-2);
+}
+
+.legend-box.level-3 {
+  background: var(--heatmap-level-3);
+}
+
+.legend-box.level-4 {
+  background: var(--heatmap-level-4);
+}
+
+.activity-heatmap {
+  overflow-x: auto;
+  padding-bottom: 10px;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(140, 14px);
+  gap: 4px;
+  min-width: min-content;
+}
+
+.heatmap-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.heatmap-cell.level-0 {
+  background: var(--heatmap-empty);
+}
+
+.heatmap-cell.level-1 {
+  background: var(--heatmap-level-1);
+}
+
+.heatmap-cell.level-2 {
+  background: var(--heatmap-level-2);
+}
+
+.heatmap-cell.level-3 {
+  background: var(--heatmap-level-3);
+}
+
+.heatmap-cell.level-4 {
+  background: var(--heatmap-level-4);
+}
+
+.heatmap-cell.today {
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.4);
+  box-shadow: 0 2px 8px var(--shadow-hover);
+  z-index: 10;
+}
+
+/* ============================================
+   MODAL STYLES
+   ============================================ */
 
 .modal {
   position: fixed;
@@ -904,5 +1015,20 @@ body {
 
   .filter-group {
     justify-content: flex-start;
+  }
+
+  .heatmap-grid {
+    grid-template-columns: repeat(140, 12px);
+    gap: 3px;
+  }
+
+  .heatmap-cell {
+    width: 12px;
+    height: 12px;
+  }
+
+  .legend-box {
+    width: 12px;
+    height: 12px;
   }
 }
