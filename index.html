@@ -72,6 +72,26 @@
         <div id="noHistory" class="empty-state">No task history yet. Complete tasks to populate history.</div>
       </div>
     </div>
+
+    <div id="activitySection" class="activity-section">
+      <div class="section-title">Activity Heatmap</div>
+      
+      <div class="card">
+        <div class="heatmap-legend">
+          <span class="legend-item">Less</span>
+          <div class="legend-colors">
+            <div class="legend-box level-0"></div>
+            <div class="legend-box level-1"></div>
+            <div class="legend-box level-2"></div>
+            <div class="legend-box level-3"></div>
+            <div class="legend-box level-4"></div>
+          </div>
+          <span class="legend-item">More</span>
+        </div>
+        
+        <div id="activityHeatmap" class="activity-heatmap"></div>
+      </div>
+    </div>
   </div>
 
   <div id="reminderModal" class="modal">
@@ -112,9 +132,11 @@
     <div class="nav-inner">
       <button id="navTasks" class="nav-btn active">Tasks</button>
       <button id="navHistory" class="nav-btn">History</button>
+      <button id="navActivity" class="nav-btn">Activity</button>
     </div>
   </div>
 
+  <script src="database.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
